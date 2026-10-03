@@ -169,7 +169,7 @@ unsigned char net_fetch_image_buffer(const char *img_url, const char *selector,
     }
     fn_close(h);
     note_fn_error(e);
-    if (e == FN_OK && buf) { *out = buf; *out_len = len; *out_alloc = size; return NET_OK; }
+    if (e == FN_OK && buf && len > 0) { *out = buf; *out_len = len; *out_alloc = size; return NET_OK; }
     /* A transport/read failure after some data keeps what arrived: zoom shows the complete rows. */
     if (buf && len > 0 && e < 0x80 && e != NETMAP_FN_UNSUPPORTED && e != NETMAP_FN_INVALID) {
         *out = buf; *out_len = len; *out_alloc = size;
