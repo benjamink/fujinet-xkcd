@@ -10,7 +10,8 @@ Requirements
 ------------
  - Any Amiga with Kickstart/Workbench 1.3 or later. The viewer runs
    in 512K. Zoom needs about 80 KB of chip RAM for
-   the screen (the check wants about 96 KB free on PAL); on a chip-only
+   the screen (the check wants about 96 KB free on PAL) plus up to
+   256 KB of any RAM for the comic; on a chip-only
    512K machine it says "Not enough chip memory for Zoom". In practice
    that means a 512K trapdoor/slow-RAM expansion or a minimal startup.
  - A FujiNet running FujiNet NIO firmware with the Image

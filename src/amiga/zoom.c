@@ -37,6 +37,7 @@
 #define KEY_ESC     0x45
 #define TEXT_PEN    0                   /* black in the grey ramp */
 #define BG_PEN      3                   /* paper: the lightest grey (white) */
+#define ZOOM_MAX_H  1024                /* the selector's height cap */
 #define MSG_COLS    (ZOOM_W / 8)
 /* Chip RAM beyond the bitplanes that OpenScreen/OpenWindow need (copper lists for both interlace
    fields, layers, rastport): a generous estimate, only used to refuse early. */
@@ -88,7 +89,7 @@ void zoom_show(const xkcd_comic_t *c)
     zs_t zs;
     unsigned char *buf = 0;
     unsigned long len = 0, alloc = 0;
-    unsigned long *row_off = 0;
+    unsigned long *row_off = 0, idx_size = 0;
     unsigned char *planes[ZOOM_DEPTH];
     char sel[64], msg[32];
     unsigned char e;
@@ -128,8 +129,10 @@ void zoom_show(const xkcd_comic_t *c)
     nw.Height = (WORD)h;
     nw.DetailPen = TEXT_PEN;
     nw.BlockPen = BG_PEN;
-    nw.IDCMPFlags = RAWKEY | MOUSEBUTTONS | MOUSEMOVE;
-    nw.Flags = BACKDROP | BORDERLESS | ACTIVATE | RMBTRAP | REPORTMOUSE | SMART_REFRESH | NOCAREREFRESH;
+    /* No mouse-move reports while the fetch blocks: V33 Intuition has no queue limit and would
+       allocate an IntuiMessage per move. Drag reporting is switched on only during a drag. */
+    nw.IDCMPFlags = RAWKEY | MOUSEBUTTONS;
+    nw.Flags = BACKDROP | BORDERLESS | ACTIVATE | RMBTRAP | SMART_REFRESH | NOCAREREFRESH;
     nw.Screen = scr;
     nw.Type = CUSTOMSCREEN;
     if (!(win = OpenWindow(&nw))) {
@@ -155,16 +158,19 @@ void zoom_show(const xkcd_comic_t *c)
         r = ilbm_doc_parse(&doc, buf, len, 0, 0);
         if (r == ILBMX_ERROR && e == NET_ERR_PARTIAL) {
             err = "Image transfer interrupted";
-        } else if (r == ILBMX_ERROR || doc.info.planes > ZOOM_DEPTH || doc.info.w > ZOOM_W) {
+        } else if (r == ILBMX_ERROR || doc.info.planes > ZOOM_DEPTH || doc.info.w > ZOOM_W ||
+                   doc.info.h > ZOOM_MAX_H) {
             err = net_error(NET_ERR_CONVERT, c->num);
-        } else if (!(row_off = (unsigned long *)AllocMem(sizeof(unsigned long) * doc.info.h, MEMF_ANY))) {
+        } else if (idx_size = sizeof(unsigned long) * doc.info.h,
+                   !(row_off = (unsigned long *)AllocMem(idx_size, MEMF_ANY))) {
+            idx_size = 0;
             err = "Not enough memory for Zoom";
         } else {
             r = ilbm_doc_parse(&doc, buf, len, row_off, doc.info.h);
             if (r == ILBMX_ERROR) {
                 err = (e == NET_ERR_PARTIAL) ? "Image transfer interrupted" : net_error(NET_ERR_CONVERT, c->num);
             } else {
-                if (r == ILBMX_PARTIAL || e == NET_ERR_PARTIAL) err = "Image transfer interrupted";
+                if (r == ILBMX_PARTIAL) err = "Image transfer interrupted";
                 have = 1;
             }
         }
@@ -194,6 +200,9 @@ void zoom_show(const xkcd_comic_t *c)
     if (err) zoom_text(rp, h, err);
 
     SetBPen(rp, BG_PEN);                /* ScrollRaster clears the vacated band to BG_PEN */
+    /* Drop keys and clicks made while "Loading" was showing. */
+    while ((m = (struct IntuiMessage *)GetMsg(win->UserPort)) != 0)
+        ReplyMsg((struct Message *)m);
     while (!done) {
         int delta = 0;
 
@@ -231,15 +240,25 @@ void zoom_show(const xkcd_comic_t *c)
                     break;
                 }
             } else if (cls == MOUSEBUTTONS) {
-                if (code == SELECTDOWN) {
+                if (code == SELECTDOWN && have && zs_scrollable(&zs)) {
                     dragging = 1;
                     last_y = my;
-                } else if (code == SELECTUP) {
+                    ModifyIDCMP(win, RAWKEY | MOUSEBUTTONS | MOUSEMOVE);
+                    ReportMouse(TRUE, win);
+                } else if (code == SELECTUP && dragging) {
                     dragging = 0;
+                    ReportMouse(FALSE, win);
+                    ModifyIDCMP(win, RAWKEY | MOUSEBUTTONS);
                 }
             } else if (cls == MOUSEMOVE && dragging) {
-                delta += last_y - my;
-                last_y = my;
+                if (qual & IEQUALIFIER_LEFTBUTTON) {
+                    delta += last_y - my;
+                    last_y = my;
+                } else {                /* missed the button release */
+                    dragging = 0;
+                    ReportMouse(FALSE, win);
+                    ModifyIDCMP(win, RAWKEY | MOUSEBUTTONS);
+                }
             }
         }
         if (have && !done && delta) {
@@ -266,7 +285,7 @@ void zoom_show(const xkcd_comic_t *c)
 
     CloseWindow(win);          /* every message taken from the port was replied above */
     CloseScreen(scr);
-    if (row_off) FreeMem(row_off, sizeof(unsigned long) * doc.info.h);
+    if (row_off) FreeMem(row_off, idx_size);
     if (buf) FreeMem(buf, alloc);
     ScreenToFront(ui_screen());
     ActivateWindow(ui_window());
