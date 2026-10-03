@@ -1,4 +1,4 @@
-/* src/amiga/ui.h - main screen: custom hires screen, backdrop window, Project menu, buttons */
+/* src/amiga/ui.h - main screen: custom hires screen, backdrop window, xkcd menu, buttons */
 #ifndef XKCD_UI_H
 #define XKCD_UI_H
 #include "xkcd.h"

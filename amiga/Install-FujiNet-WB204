@@ -1,0 +1,40 @@
+; Install the FujiNet NIO driver and tools on Workbench 2.04 (Kickstart 2.0x).
+;
+; Run it from the NIO disk:
+;   Execute NIO:Install-FujiNet-WB204
+;
+; It installs the Kickstart 1.3 (nix13) builds, which use only V33 calls and
+; run unchanged on 2.04. The drivers are loaded at boot from S:User-Startup,
+; which the 2.04 Startup-Sequence runs when it exists.
+; Disk image mounting (FMOUNT, FUMOUNT, FBOOT) is not set up by this script.
+; It is safe to run again.
+
+FailAt 21
+
+Copy NIO:fujinet-nio.device TO DEVS: QUIET
+Copy NIO:fujinet-disk.device TO DEVS: QUIET
+Copy NIO:fujinet-load-resident TO C: QUIET
+Copy NIO:fujinet-mount TO C: QUIET
+Copy NIO:fujinet-nio-exchange TO C: QUIET
+Copy NIO:fapp TO C: QUIET
+Copy NIO:fdrive TO C: QUIET
+Copy NIO:fhost TO C: QUIET
+Copy NIO:fin TO C: QUIET
+Copy NIO:fls TO C: QUIET
+Copy NIO:fout TO C: QUIET
+
+If NOT EXISTS S:User-Startup
+  Echo >S:User-Startup "; User-Startup"
+EndIf
+
+Search >NIL: S:User-Startup "fujinet-load-resident" QUIET
+If WARN
+  Echo >>S:User-Startup "C:fujinet-load-resident DEVS:fujinet-nio.device fujinet-nio.device"
+  Echo >>S:User-Startup "C:fujinet-load-resident DEVS:fujinet-disk.device fujinet-disk.device"
+  Echo "Added the FujiNet drivers to S:User-Startup."
+Else
+  Echo "S:User-Startup already loads the FujiNet drivers; left it unchanged."
+EndIf
+
+Echo "FujiNet installed. Reboot to load the drivers."
+Echo "Until then, Execute NIO:Run-xkcd loads the driver and starts xkcd."

@@ -1,9 +1,12 @@
 /* src/amiga/net.c - FujiNet NIO access: xkcd JSON and streamed, translated ILBM. */
 #include <stdio.h>
 #include <proto/dos.h>
+#include <proto/exec.h>
+#include <exec/memory.h>
 #include "fujinet-nio.h"
 #include "net.h"
 #include "jsonstrip.h"
+#include "zoomscroll.h"
 
 #define JSON_WAITS  750         /* 15 s at Delay(1) = 1/50 s */
 #define IMAGE_WAITS 3000        /* 60 s: FujiNet buffers the whole image, then converts before the first read */
@@ -122,6 +125,63 @@ unsigned char net_fetch_image(const char *img_url, const char *selector, net_hea
     return netmap_image(e, r, header_fail, ilbm_rows_done(&dec), have_header ? ilbm_info(&dec)->h : 0);
 }
 
+unsigned char net_fetch_image_buffer(const char *img_url, const char *selector,
+                                     unsigned char **out, unsigned long *out_len, unsigned long *out_alloc)
+{
+    static unsigned char chunk[512];
+    fn_handle_t h;
+    unsigned char *buf = 0, *nb;
+    unsigned long size = 0, len = 0, want;
+    unsigned short n, status = 0;
+    uint32_t clen = 0;
+    unsigned char fl = 0, ifl = 0, e;
+
+    *out = 0; *out_len = 0; *out_alloc = 0;
+    if ((e = ensure_up()) != FN_OK) return e;
+    e = fn_open_translated(&h, FN_METHOD_GET, img_url, FN_OPEN_FOLLOW_REDIR, FN_TRANSLATE_IMAGE, 0, selector);
+    if (e != FN_OK) return netmap_open_error(finish(e));
+    for (;;) {
+        e = read_chunk(h, len, chunk, sizeof chunk, &n, &fl, IMAGE_WAITS);
+        if (e != FN_OK) break;
+        if (!buf) {
+            /* The first successful read means the translation is ready, so Info reports its size. */
+            want = ZOOM_BUF_START;
+            if (fn_info(h, &status, &clen, &ifl) == FN_OK && (ifl & FN_INFO_HAS_LENGTH) && clen > 0) {
+                if (clen > ZOOM_BUF_MAX) { e = NET_ERR_ZOOMBIG; break; }
+                want = clen;
+            }
+            if (want < n) want = n;
+            if (!(buf = (unsigned char *)AllocMem(want, MEMF_ANY))) { e = NET_ERR_NOMEM; break; }
+            size = want;
+        }
+        if (len + n > size) {
+            unsigned long grow = bufgrow_next(size, len + n, ZOOM_BUF_MAX);
+            if (!grow) { e = NET_ERR_ZOOMBIG; break; }
+            if (!(nb = (unsigned char *)AllocMem(grow, MEMF_ANY))) { e = NET_ERR_NOMEM; break; }
+            CopyMem(buf, nb, len);
+            FreeMem(buf, size);
+            buf = nb;
+            size = grow;
+        }
+        CopyMem(chunk, buf + len, n);
+        len += n;
+        if ((fl & FN_READ_EOF) || n == 0) break;
+    }
+    fn_close(h);
+    note_fn_error(e);
+    if (e == FN_OK && buf && len > 0) { *out = buf; *out_len = len; *out_alloc = size; return NET_OK; }
+    /* A transport/read failure after some data keeps what arrived: zoom shows the complete rows. */
+    if (buf && len > 0 && e < 0x80 && e != NETMAP_FN_UNSUPPORTED && e != NETMAP_FN_INVALID) {
+        *out = buf; *out_len = len; *out_alloc = size;
+        return NET_ERR_PARTIAL;
+    }
+    if (buf) FreeMem(buf, size);
+    if (e == FN_OK) return NET_ERR_CONVERT;             /* EOF with no data */
+    if (e == NETMAP_FN_UNSUPPORTED) return NET_ERR_TOOBIG;
+    if (e == NETMAP_FN_INVALID) return NET_ERR_CONVERT;
+    return e;
+}
+
 const char *net_error(unsigned char e, long num)
 {
     static char msg[48];
@@ -133,6 +193,7 @@ const char *net_error(unsigned char e, long num)
     case NET_ERR_TOOBIG:   return "Image too large for FujiNet to convert";
     case NET_ERR_CONVERT:  return "FujiNet could not convert this image";
     case NET_ERR_PARTIAL:  return "Image transfer interrupted";
+    case NET_ERR_ZOOMBIG:  return "Image too large for Zoom";
     case NET_ERR_NOIMAGE:  return "FujiNet firmware lacks image conversion (update it)";
     case NET_ERR_NOMEM:    return "Not enough chip memory";
     case FN_ERR_TRANSPORT: return "No reply from FujiNet";

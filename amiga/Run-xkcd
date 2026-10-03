@@ -1,0 +1,6 @@
+; Load the FujiNet NIO driver (if not already resident) and start xkcd.
+; Usage from a Shell: Execute NIO:Run-xkcd
+FailAt 21
+NIO:fujinet-load-resident NIO:fujinet-nio.device fujinet-nio.device
+Stack 16000
+NIO:xkcd

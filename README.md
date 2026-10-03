@@ -20,8 +20,10 @@ straight into the screen's bitplanes.
 - An Amiga with Kickstart/Workbench **1.3** (V33) or later and **512 KB**
   chip RAM. The main viewer runs on a stock 512K A500. The app uses only V33
   OS calls, the nix13 C runtime and no floating point.
-- **Zoom** (full-screen, 640x512 interlaced) needs about 180 KB of free chip
-  RAM. On a chip-only 512K machine booted from an HDF it fails gracefully with
+- **Zoom** (full-screen, 640x512 interlaced, 4 grey levels) needs about
+  80 KB of chip RAM for the screen (the check wants about 96 KB free on PAL),
+  plus up to 256 KB of any RAM for the comic. On a chip-only 512K machine
+  booted from an HDF it fails gracefully with
   "Not enough chip memory for Zoom". In practice Zoom wants a 512K
   trapdoor/slow-RAM expansion (or a minimal startup-sequence).
 - A FujiNet running a **FujiNet NIO firmware with the Image translator**
@@ -63,15 +65,47 @@ The disk image contains `xkcd`, `ReadMe` and their icons. The icons in
 `tools/mkinfo.py` and committed, so the build does not need Python. Rerun
 `tools/mkinfo.py` from the repository root after editing the art.
 
+### Test disk with the FujiNet driver
+
+`tools/make-nio-adf.sh` builds an OFS disk labelled `NIO`. It holds the
+FujiNet NIO drivers and tools from the workspace's WB1.3 artifact set, xkcd,
+and install scripts:
+
+```sh
+(cd $NIO_WORKSPACE && scripts/amiga-artifacts wb13)
+make amiga
+tools/make-nio-adf.sh            # -> r2r/amiga/xkcd-nio.adf
+```
+
+On the Amiga, from a Shell:
+
+- Workbench 1.3: `Execute NIO:Install-FujiNet-WB13`.
+- Workbench 2.04: `Execute NIO:Install-FujiNet-WB204`. It copies the drivers
+  and tools and adds the driver loading to `S:User-Startup`. It does not set
+  up disk image mounting (`FMOUNT`). The Kickstart 1.3 builds it installs
+  run unchanged on 2.04.
+- Without installing: `Execute NIO:Run-xkcd` loads the driver and starts xkcd.
+
 ## Controls
 
 | Control | Key | Action |
 |---|---|---|
 | **< Previous** | Left | Go back through the last 25 comics viewed |
-| **Zoom** | Z | Show the comic full-screen (interlaced); **Esc** returns |
+| **Zoom** | Z | Show the comic full-screen (interlaced, grey, fitted to the screen width); **Esc** returns |
 | **Next >** | Right | Go forward through history; past the newest entry, fetch a new random comic |
 
-The **Project** menu (right mouse button):
+In **Zoom**, a comic taller than the screen scrolls, and a bar at the right
+edge shows the position:
+
+| Control | Action |
+|---|---|
+| **Up** / **Down** | Scroll 16 rows |
+| **Shift+Up** / **Shift+Down**, **Space** / **Backspace** | Scroll one page |
+| **T** / **B** | Jump to the top / bottom |
+| Left mouse button drag | Scroll with the mouse |
+| **Esc** | Return to the main view |
+
+The **xkcd** menu (right mouse button):
 
 | Item | Shortcut | Action |
 |---|---|---|
@@ -103,8 +137,9 @@ This app sends (see `src/selector.c`):
 
 - Main view, pens 4–15 on the 640×256 (PAL) or 640×200 (NTSC) hires screen:
   `fmt=ilbm,bits=4,w=624,h=150,colors=12,base=4,par=1:2` (PAL) or `h=110` (NTSC).
-- Zoom, pens 0–15 on the 640×512 (PAL) or 640×400 (NTSC) interlaced screen:
-  `fmt=ilbm,bits=4,w=640,h=512,colors=16,base=0` (PAL) or `h=400` (NTSC).
+- Zoom, 4 grey pens on the 640×512 (PAL) or 640×400 (NTSC) interlaced screen,
+  width-fitted and up to 1024 rows tall (the app scrolls the rest):
+  `fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024` (same for PAL and NTSC).
 
 ## Credits
 

@@ -12,6 +12,12 @@ unsigned char net_fetch_comic(long num, xkcd_comic_t *out);          /* num<=0 =
 typedef int (*net_header_cb)(void *ctx, const ilbm_info_t *info, unsigned char **planes,
                              unsigned char *nplanes, unsigned short *bpr, unsigned short *max_rows);
 unsigned char net_fetch_image(const char *img_url, const char *selector, net_header_cb cb, void *ctx);
+#define ZOOM_BUF_MAX   262144UL
+#define ZOOM_BUF_START 16384UL
+/* Reads the whole translated ILBM into one MEMF_ANY buffer. On NET_OK or NET_ERR_PARTIAL, *buf is
+   non-zero and the caller frees it with FreeMem(*buf, *alloc_size). On every other result, *buf is 0. */
+unsigned char net_fetch_image_buffer(const char *img_url, const char *selector,
+                                     unsigned char **buf, unsigned long *len, unsigned long *alloc_size);
 const char *net_error(unsigned char err, long num);   /* user-facing text; num used for "Comic #N does not exist" */
 void net_shutdown(void);
 #endif

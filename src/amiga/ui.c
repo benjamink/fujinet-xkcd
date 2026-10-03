@@ -1,5 +1,5 @@
 /* src/amiga/ui.c - main screen for Kickstart 1.3 (V33): custom hires screen, one borderless
-   backdrop window, the Project menu and the Previous/Zoom/Next buttons.
+   backdrop window, the xkcd menu and the Previous/Zoom/Next buttons.
 
    PAL layout (640 x 256); NTSC (640 x 200) takes 40 lines off the image box and one caption line:
      y   0- 10  screen title bar: "xkcd #353  Python  (2007-03-05)"
@@ -124,9 +124,9 @@ static void setup_menu(void)
         items[i].Command = item_key[i];
     }
     memset(&menu, 0, sizeof menu);
-    menu.Width = 8 * 8 + 8; menu.Height = 10;
+    menu.Width = 4 * 8 + 8; menu.Height = 10;      /* "xkcd" in topaz 8 plus margin */
     menu.Flags = MENUENABLED;
-    menu.MenuName = (APTR)"Project";
+    menu.MenuName = (APTR)"xkcd";
     menu.FirstItem = &items[0];
 }
 

@@ -45,7 +45,12 @@ remove that override.
 - `-mcrt=nix13`, 68000 and **no floating point**.
 - A500 with 512 KB chip RAM is the minimum:
   - Check every chip allocation. On failure, show a message and never crash.
-  - Zoom needs about 180 KB of free chip RAM and refuses gracefully without it.
+  - Zoom needs about 80 KB of chip RAM for the screen (2 bitplanes; the
+    pre-check wants about 96 KB free on PAL) and refuses
+    gracefully without it.
+  - Zoom keeps the compressed ILBM in `MEMF_ANY` memory (at most 256 KB) and
+    decodes only the visible rows into the screen; it never decodes the whole
+    image.
 - Never `WaitIO` an IORequest that was only opened and never sent.
 - Free every resource on every exit path:
   - `ClearMenuStrip` before `CloseWindow`;
@@ -53,7 +58,8 @@ remove that override.
   - `ReplyMsg` every IntuiMessage, and never touch it afterwards;
   - remove the Fetch ID input.device handler before freeing anything it uses.
 - The ILBM decoder writes straight into screen bitplanes. Image placement must
-  stay word-aligned and inside the box, via `ui_place_image()`.
+  stay word-aligned and inside the box, via `ui_place_image()` (main view).
+  Zoom places its own image: word-aligned x, clamped to the bitmap row width.
 
 ## FujiNet contract
 
@@ -63,6 +69,8 @@ remove that override.
   character. The grammar is in `fujinet-nio/docs/network_device_protocol.md`.
   This app sends `fmt=ilbm,bits=4` prefix, plus spatial and palette keys.
   If you change a selector, re-check it against that grammar.
+  The Zoom selector is exactly
+  `fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024` (PAL and NTSC).
 - Older firmware rejects type 4 at Open with `FN_ERR_INVALID`. The app maps
   that to "FujiNet firmware lacks image conversion" (`netmap_open_error`).
   Keep the open-stage and read-stage error mappings separate.

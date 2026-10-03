@@ -111,12 +111,14 @@ static void test_selectors(void) {
     char s[64];
     selector_main(s, sizeof s, 1); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=624,h=150,colors=12,base=4,par=1:2") == 0);
     selector_main(s, sizeof s, 0); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=624,h=110,colors=12,base=4,par=1:2") == 0);
-    selector_zoom(s, sizeof s, 1); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=640,h=512,colors=16,base=0") == 0);
-    selector_zoom(s, sizeof s, 0); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=640,h=400,colors=16,base=0") == 0);
+    selector_zoom(s, sizeof s, 1); CHECK(strcmp(s, "fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024") == 0);
+    selector_zoom(s, sizeof s, 0); CHECK(strcmp(s, "fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024") == 0);
 }
 
 #include "ilbm.h"
 #include "netmap.h"
+#include "ilbm_index.h"
+#include "zoomscroll.h"
 #include <stdlib.h>
 
 /* 16x2, 2 planes, ByteRun1. Row0 plane0 = FF FF, plane1 = 00 00; Row1 plane0 = 00 0F (literal), plane1 = F0 00 */
@@ -195,6 +197,176 @@ static void test_ilbm_fixture(void)
     CHECK(ilbm_rows_done(&d) == ilbm_info(&d)->h);
     for (i = 0; i < 4; ++i) free(planes[i]);
     free(planes); free(buf);
+}
+
+/* ---- ilbm_index ---- */
+static unsigned char *load_file(const char *path, long *len)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char *b;
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END); *len = ftell(f); fseek(f, 0, SEEK_SET);
+    b = malloc((size_t)*len);
+    if (fread(b, 1, (size_t)*len, f) != (size_t)*len) { free(b); fclose(f); return 0; }
+    fclose(f);
+    return b;
+}
+
+/* Reference: decode a whole ILBM with the streaming decoder into planes[np] of bpr x h. */
+static unsigned short stream_decode(const unsigned char *src, unsigned long n, unsigned char **planes,
+                                    unsigned char np, unsigned short bpr, unsigned short h)
+{
+    ilbm_t d; unsigned long off = 0; unsigned short used; int r = ILBM_NEED_MORE;
+    ilbm_init(&d);
+    while (off < n) {
+        unsigned short k = (unsigned short)((n - off) > 512UL ? 512UL : (n - off));
+        r = ilbm_feed(&d, src + off, k, &used);
+        off += used;
+        if (r == ILBM_HEADER) ilbm_set_target(&d, planes, np, bpr, h);
+        else if (r != ILBM_NEED_MORE) break;
+    }
+    return ilbm_rows_done(&d);
+}
+
+static void check_ranges_match(const unsigned char *src, unsigned long n, unsigned short step)
+{
+    ilbm_doc_t doc; unsigned long *idx; unsigned char *ref[8], *got[8];
+    unsigned short h, bpr, first, cnt; unsigned char np, p;
+    CHECK(ilbm_doc_parse(&doc, src, n, 0, 0) == ILBMX_OK);
+    h = doc.info.h; np = doc.info.planes; bpr = doc.src_bpr;
+    idx = malloc(sizeof *idx * h);
+    CHECK(ilbm_doc_parse(&doc, src, n, idx, h) == ILBMX_OK);
+    CHECK(doc.rows == h);
+    for (p = 0; p < np; ++p) { ref[p] = calloc(bpr, h); got[p] = calloc(bpr, h); }
+    CHECK(stream_decode(src, n, ref, np, bpr, h) == h);
+    for (first = 0; first < h; first = (unsigned short)(first + step)) {
+        for (cnt = 1; first + cnt <= h; cnt = (unsigned short)(cnt * 2 + 1)) {
+            for (p = 0; p < np; ++p) memset(got[p], 0xAA, (size_t)bpr * h);
+            ilbm_doc_decode_rows(&doc, first, cnt, got, np, bpr, first);
+            for (p = 0; p < np; ++p) {
+                size_t k, lo = (size_t)first * bpr, hi = (size_t)(first + cnt) * bpr;
+                CHECK(memcmp(got[p] + lo, ref[p] + lo, hi - lo) == 0);
+                for (k = 0; k < (size_t)bpr * h; ++k)
+                    if ((k < lo || k >= hi) && got[p][k] != 0xAA) { CHECK(!"write outside requested rows"); break; }
+            }
+            if (fails) goto out;
+        }
+    }
+out:
+    for (p = 0; p < np; ++p) { free(ref[p]); free(got[p]); }
+    free(idx);
+}
+
+static void test_ilbmx_tiny_ranges(void) { check_ranges_match(TINY, sizeof TINY, 1); }
+
+/* TINY with an uncompressed BODY (compression 0, 8 bytes). */
+static void test_ilbmx_tiny_uncompressed(void)
+{
+    static const unsigned char rows[8] = { 0xFF,0xFF, 0x00,0x00, 0x00,0x0F, 0xF0,0x00 };
+    unsigned char raw[76];
+    memcpy(raw, TINY, 68);
+    raw[7] = 68;                 /* FORM len: 4 + 28 + 20 + 16 */
+    CHECK(raw[30] == 1);         /* BMHD compression byte */
+    raw[30] = 0;
+    CHECK(raw[60] == 'B' && raw[67] == 0x0A);
+    raw[67] = 8;                 /* BODY len */
+    memcpy(raw + 68, rows, 8);
+    check_ranges_match(raw, sizeof raw, 1);
+}
+
+/* Chunk lengths from the wire must never wrap pointer arithmetic (32-bit on the 68000). */
+static void test_ilbmx_huge_chunk_len(void)
+{
+    static const unsigned char lens[2][4] = { {0xFF,0xFF,0xFF,0xF8}, {0xFF,0xFF,0xFF,0xE6} };
+    unsigned i; ilbm_doc_t doc; unsigned long idx[2];
+    for (i = 0; i < 2; ++i) {
+        unsigned char b[64];
+        memset(b, 0, sizeof b);
+        memcpy(b, "FORM", 4); b[7] = 56; memcpy(b + 8, "ILBM", 4);
+        memcpy(b + 12, "JUNK", 4); memcpy(b + 16, lens[i], 4);
+        /* No BMHD seen before the walk stops: invalid. */
+        CHECK(ilbm_doc_parse(&doc, b, sizeof b, 0, 0) == ILBMX_ERROR);
+        CHECK(ilbm_doc_parse(&doc, b, sizeof b, idx, 2) == ILBMX_ERROR);
+    }
+    {   /* Valid BMHD, then JUNK with a huge length, then a BODY that is never reached. */
+        unsigned char b[sizeof TINY + 16];
+        memcpy(b, TINY, 12 + 28);                       /* FORM, ILBM, BMHD */
+        memcpy(b + 40, "JUNK", 4); memcpy(b + 44, lens[0], 4);
+        memset(b + 48, 0, 4);
+        memcpy(b + 52, TINY + 60, sizeof TINY - 60);    /* BODY header + data */
+        /* Header is valid, the walk stops at JUNK: OK with no BODY found; index call is PARTIAL. */
+        CHECK(ilbm_doc_parse(&doc, b, 52 + (sizeof TINY - 60), 0, 0) == ILBMX_OK);
+        CHECK(doc.body == 0 && doc.body_len == 0);
+        CHECK(ilbm_doc_parse(&doc, b, 52 + (sizeof TINY - 60), idx, 2) == ILBMX_PARTIAL);
+        CHECK(doc.rows == 0);
+    }
+}
+
+static void test_ilbmx_fixtures(void)
+{
+    static const char *files[] = { "tests/fixtures/python_640x400x16.iff", "tests/fixtures/2636_zoom_gray4.iff" };
+    unsigned i;
+    for (i = 0; i < 2; ++i) {
+        long n = 0; unsigned char *b = load_file(files[i], &n);
+        CHECK(b != 0);
+        if (!b) continue;
+        check_ranges_match(b, (unsigned long)n, 37);
+        free(b);
+    }
+}
+
+static void test_ilbmx_header_only(void)
+{
+    ilbm_doc_t doc;
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY, 0, 0) == ILBMX_OK);
+    CHECK(doc.info.w == 16 && doc.info.h == 2 && doc.info.planes == 2 && doc.src_bpr == 2);
+    CHECK(doc.info.ncolors == 4 && doc.body != 0 && doc.body_len == 10 && doc.rows == 0);
+}
+
+static void test_ilbmx_truncated(void)
+{
+    ilbm_doc_t doc; unsigned long idx[2];
+    /* Drop the last 3 bytes: row 1 plane 1 is incomplete, so only row 0 is indexed. */
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY - 3, idx, 2) == ILBMX_PARTIAL);
+    CHECK(doc.rows == 1);
+    /* Header complete, BODY header present but no body bytes. */
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY - 10, idx, 2) == ILBMX_PARTIAL);
+    CHECK(doc.rows == 0);
+    /* Cut inside the BMHD: header invalid. */
+    CHECK(ilbm_doc_parse(&doc, TINY, 30, idx, 2) == ILBMX_ERROR);
+}
+
+static void test_ilbmx_garbage(void)
+{
+    ilbm_doc_t doc; unsigned long idx[2];
+    const unsigned char html[] = "<html><body>404</body></html>";
+    CHECK(ilbm_doc_parse(&doc, html, sizeof html - 1, idx, 2) == ILBMX_ERROR);
+    CHECK(ilbm_doc_parse(&doc, html, sizeof html - 1, 0, 0) == ILBMX_ERROR);
+}
+
+static void test_ilbmx_overflow_rejected(void)
+{
+    unsigned char bad[sizeof TINY]; ilbm_doc_t doc; unsigned long idx[2];
+    memcpy(bad, TINY, sizeof TINY);
+    /* First BODY control byte (offset 68): 0xFF = run of 2 -> make it 0xFD = run of 4 > src_bpr 2. */
+    CHECK(bad[68] == 0xFF);
+    bad[68] = 0xFD;
+    CHECK(ilbm_doc_parse(&doc, bad, sizeof bad, idx, 2) == ILBMX_ERROR);
+}
+
+static void test_ilbmx_clip_and_discard(void)
+{
+    ilbm_doc_t doc; unsigned long idx[2]; unsigned char p0[4], *pl[1];
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY, idx, 2) == ILBMX_OK);
+    memset(p0, 0x55, sizeof p0); pl[0] = p0;
+    /* Only plane 0 wanted, destination 1 byte per row: plane 1 discarded, col 1 clipped. */
+    ilbm_doc_decode_rows(&doc, 0, 2, pl, 1, 1, 0);
+    CHECK(p0[0] == 0xFF && p0[1] == 0x00);
+    CHECK(p0[2] == 0x55 && p0[3] == 0x55);
+    /* Asking past the indexed rows stops at doc.rows. */
+    memset(p0, 0x55, sizeof p0);
+    ilbm_doc_decode_rows(&doc, 1, 5, pl, 1, 2, 0);
+    CHECK(p0[0] == 0x00 && p0[1] == 0x0F && p0[2] == 0x55);
 }
 
 static void test_netmap(void) {
@@ -295,6 +467,58 @@ static void test_xkcd_long_url(void) {
     CHECK(xkcd_parse(j, (unsigned short)strlen(j), &c) && !c.has_image);
 }
 
+static void test_zs_tall_image(void)
+{
+    zs_t z; int f, c;
+    zs_init(&z, 1024, 512);
+    CHECK(zs_scrollable(&z) && zs_max_top(&z) == 512 && zs_page(&z) == 480);
+    CHECK(zs_scroll(&z, ZS_LINE) == 16 && z.top == 16);
+    CHECK(zs_scroll(&z, -100) == -16 && z.top == 0);
+    CHECK(zs_scroll(&z, 10000) == 512 && z.top == 512);
+    CHECK(zs_scroll(&z, 1) == 0 && z.top == 512);
+    zs_exposed(16, 512, &f, &c);  CHECK(f == 496 && c == 16);
+    zs_exposed(-16, 512, &f, &c); CHECK(f == 0 && c == 16);
+    zs_exposed(0, 512, &f, &c);   CHECK(c == 0);
+}
+
+static void test_zs_exposed_full(void)
+{
+    int f, c;
+    zs_exposed(512, 512, &f, &c);  CHECK(f == 0 && c == 512);
+    zs_exposed(-600, 512, &f, &c); CHECK(f == 0 && c == 512);
+}
+
+static void test_zs_short_image(void)
+{
+    zs_t z; int y, h;
+    zs_init(&z, 300, 512);
+    CHECK(!zs_scrollable(&z) && zs_max_top(&z) == 0);
+    CHECK(zs_scroll(&z, 50) == 0 && z.top == 0);
+    zs_thumb(&z, 512, &y, &h); CHECK(y == 0 && h == 512);
+}
+
+static void test_zs_thumb(void)
+{
+    zs_t z; int y, h;
+    zs_init(&z, 1024, 512);
+    zs_thumb(&z, 512, &y, &h); CHECK(h == 256 && y == 0);
+    zs_scroll(&z, 512);
+    zs_thumb(&z, 512, &y, &h); CHECK(h == 256 && y == 256);
+    zs_init(&z, 100000, 400);
+    zs_thumb(&z, 400, &y, &h); CHECK(h == ZS_MIN_THUMB);
+}
+
+static void test_bufgrow(void)
+{
+    CHECK(bufgrow_next(16384, 16385, 262144) == 32768);
+    CHECK(bufgrow_next(16384, 70000, 262144) == 131072);
+    CHECK(bufgrow_next(131072, 200000, 262144) == 262144);
+    CHECK(bufgrow_next(262144, 262145, 262144) == 0);
+    CHECK(bufgrow_next(0, 5, 262144) == 8);                  /* size 0 starts at 1 */
+    CHECK(bufgrow_next(1000, 10, 262144) == 1000);           /* already big enough */
+    CHECK(bufgrow_next(1UL << 31, 0xFFFFFFFFUL, 0xFFFFFFFFUL) == 0xFFFFFFFFUL); /* no wrap */
+}
+
 int main(void) {
     RUN(test_json_c1); RUN(test_jsonstrip_long_transcript); RUN(test_jsonstrip_key_inside_value);
     RUN(test_jsonstrip_overflow); RUN(test_xkcd_long_url);
@@ -304,6 +528,11 @@ int main(void) {
     RUN(test_ilbm_tiny_any_chunking); RUN(test_ilbm_truncated_body);
     RUN(test_ilbm_rejects_garbage); RUN(test_ilbm_fixture); RUN(test_netmap); RUN(test_netmap_open);
     RUN(test_autorange);
+    RUN(test_ilbmx_tiny_ranges); RUN(test_ilbmx_tiny_uncompressed); RUN(test_ilbmx_huge_chunk_len); RUN(test_ilbmx_fixtures); RUN(test_ilbmx_header_only);
+    RUN(test_ilbmx_truncated); RUN(test_ilbmx_garbage); RUN(test_ilbmx_overflow_rejected);
+    RUN(test_ilbmx_clip_and_discard);
+    RUN(test_zs_tall_image); RUN(test_zs_exposed_full); RUN(test_zs_short_image);
+    RUN(test_zs_thumb); RUN(test_bufgrow);
     printf(fails ? "%d FAILURES\n" : "ALL PASS\n", fails);
     return fails != 0;
 }
