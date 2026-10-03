@@ -41,7 +41,7 @@ In Zoom, tall comics scroll: Up/Down 16 rows, Shift+Up/Down or
 Space/Backspace one page, T top, B bottom, or drag with the left
 mouse button. A bar at the right edge shows the position.
 
-Project menu (right mouse button)
+xkcd menu (right mouse button)
 ---------------------------------
    Fetch ID...       Amiga-F   show a comic by number. Type the
                                number, then OK or Return; Cancel

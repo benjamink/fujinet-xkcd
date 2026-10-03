@@ -105,7 +105,7 @@ edge shows the position:
 | Left mouse button drag | Scroll with the mouse |
 | **Esc** | Return to the main view |
 
-The **Project** menu (right mouse button):
+The **xkcd** menu (right mouse button):
 
 | Item | Shortcut | Action |
 |---|---|---|
