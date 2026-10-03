@@ -63,6 +63,27 @@ The disk image contains `xkcd`, `ReadMe` and their icons. The icons in
 `tools/mkinfo.py` and committed, so the build does not need Python. Rerun
 `tools/mkinfo.py` from the repository root after editing the art.
 
+### Test disk with the FujiNet driver
+
+`tools/make-nio-adf.sh` builds an OFS disk labelled `NIO`. It holds the
+FujiNet NIO drivers and tools from the workspace's WB1.3 artifact set, xkcd,
+and install scripts:
+
+```sh
+(cd $NIO_WORKSPACE && scripts/amiga-artifacts wb13)
+make amiga
+tools/make-nio-adf.sh            # -> r2r/amiga/xkcd-nio.adf
+```
+
+On the Amiga, from a Shell:
+
+- Workbench 1.3: `Execute NIO:Install-FujiNet-WB13`.
+- Workbench 2.04: `Execute NIO:Install-FujiNet-WB204`. It copies the drivers
+  and tools and adds the driver loading to `S:User-Startup`. It does not set
+  up disk image mounting (`FMOUNT`). The Kickstart 1.3 builds it installs
+  run unchanged on 2.04.
+- Without installing: `Execute NIO:Run-xkcd` loads the driver and starts xkcd.
+
 ## Controls
 
 | Control | Key | Action |
