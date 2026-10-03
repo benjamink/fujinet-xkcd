@@ -118,6 +118,7 @@ static void test_selectors(void) {
 #include "ilbm.h"
 #include "netmap.h"
 #include "ilbm_index.h"
+#include "zoomscroll.h"
 #include <stdlib.h>
 
 /* 16x2, 2 planes, ByteRun1. Row0 plane0 = FF FF, plane1 = 00 00; Row1 plane0 = 00 0F (literal), plane1 = F0 00 */
@@ -466,6 +467,58 @@ static void test_xkcd_long_url(void) {
     CHECK(xkcd_parse(j, (unsigned short)strlen(j), &c) && !c.has_image);
 }
 
+static void test_zs_tall_image(void)
+{
+    zs_t z; int f, c;
+    zs_init(&z, 1024, 512);
+    CHECK(zs_scrollable(&z) && zs_max_top(&z) == 512 && zs_page(&z) == 480);
+    CHECK(zs_scroll(&z, ZS_LINE) == 16 && z.top == 16);
+    CHECK(zs_scroll(&z, -100) == -16 && z.top == 0);
+    CHECK(zs_scroll(&z, 10000) == 512 && z.top == 512);
+    CHECK(zs_scroll(&z, 1) == 0 && z.top == 512);
+    zs_exposed(16, 512, &f, &c);  CHECK(f == 496 && c == 16);
+    zs_exposed(-16, 512, &f, &c); CHECK(f == 0 && c == 16);
+    zs_exposed(0, 512, &f, &c);   CHECK(c == 0);
+}
+
+static void test_zs_exposed_full(void)
+{
+    int f, c;
+    zs_exposed(512, 512, &f, &c);  CHECK(f == 0 && c == 512);
+    zs_exposed(-600, 512, &f, &c); CHECK(f == 0 && c == 512);
+}
+
+static void test_zs_short_image(void)
+{
+    zs_t z; int y, h;
+    zs_init(&z, 300, 512);
+    CHECK(!zs_scrollable(&z) && zs_max_top(&z) == 0);
+    CHECK(zs_scroll(&z, 50) == 0 && z.top == 0);
+    zs_thumb(&z, 512, &y, &h); CHECK(y == 0 && h == 512);
+}
+
+static void test_zs_thumb(void)
+{
+    zs_t z; int y, h;
+    zs_init(&z, 1024, 512);
+    zs_thumb(&z, 512, &y, &h); CHECK(h == 256 && y == 0);
+    zs_scroll(&z, 512);
+    zs_thumb(&z, 512, &y, &h); CHECK(h == 256 && y == 256);
+    zs_init(&z, 100000, 400);
+    zs_thumb(&z, 400, &y, &h); CHECK(h == ZS_MIN_THUMB);
+}
+
+static void test_bufgrow(void)
+{
+    CHECK(bufgrow_next(16384, 16385, 262144) == 32768);
+    CHECK(bufgrow_next(16384, 70000, 262144) == 131072);
+    CHECK(bufgrow_next(131072, 200000, 262144) == 262144);
+    CHECK(bufgrow_next(262144, 262145, 262144) == 0);
+    CHECK(bufgrow_next(0, 5, 262144) == 8);                  /* size 0 starts at 1 */
+    CHECK(bufgrow_next(1000, 10, 262144) == 1000);           /* already big enough */
+    CHECK(bufgrow_next(1UL << 31, 0xFFFFFFFFUL, 0xFFFFFFFFUL) == 0xFFFFFFFFUL); /* no wrap */
+}
+
 int main(void) {
     RUN(test_json_c1); RUN(test_jsonstrip_long_transcript); RUN(test_jsonstrip_key_inside_value);
     RUN(test_jsonstrip_overflow); RUN(test_xkcd_long_url);
@@ -478,6 +531,8 @@ int main(void) {
     RUN(test_ilbmx_tiny_ranges); RUN(test_ilbmx_tiny_uncompressed); RUN(test_ilbmx_huge_chunk_len); RUN(test_ilbmx_fixtures); RUN(test_ilbmx_header_only);
     RUN(test_ilbmx_truncated); RUN(test_ilbmx_garbage); RUN(test_ilbmx_overflow_rejected);
     RUN(test_ilbmx_clip_and_discard);
+    RUN(test_zs_tall_image); RUN(test_zs_exposed_full); RUN(test_zs_short_image);
+    RUN(test_zs_thumb); RUN(test_bufgrow);
     printf(fails ? "%d FAILURES\n" : "ALL PASS\n", fails);
     return fails != 0;
 }
