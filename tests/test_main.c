@@ -117,6 +117,7 @@ static void test_selectors(void) {
 
 #include "ilbm.h"
 #include "netmap.h"
+#include "ilbm_index.h"
 #include <stdlib.h>
 
 /* 16x2, 2 planes, ByteRun1. Row0 plane0 = FF FF, plane1 = 00 00; Row1 plane0 = 00 0F (literal), plane1 = F0 00 */
@@ -195,6 +196,129 @@ static void test_ilbm_fixture(void)
     CHECK(ilbm_rows_done(&d) == ilbm_info(&d)->h);
     for (i = 0; i < 4; ++i) free(planes[i]);
     free(planes); free(buf);
+}
+
+/* ---- ilbm_index ---- */
+static unsigned char *load_file(const char *path, long *len)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char *b;
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END); *len = ftell(f); fseek(f, 0, SEEK_SET);
+    b = malloc((size_t)*len);
+    if (fread(b, 1, (size_t)*len, f) != (size_t)*len) { free(b); fclose(f); return 0; }
+    fclose(f);
+    return b;
+}
+
+/* Reference: decode a whole ILBM with the streaming decoder into planes[np] of bpr x h. */
+static unsigned short stream_decode(const unsigned char *src, unsigned long n, unsigned char **planes,
+                                    unsigned char np, unsigned short bpr, unsigned short h)
+{
+    ilbm_t d; unsigned long off = 0; unsigned short used; int r = ILBM_NEED_MORE;
+    ilbm_init(&d);
+    while (off < n) {
+        unsigned short k = (unsigned short)((n - off) > 512UL ? 512UL : (n - off));
+        r = ilbm_feed(&d, src + off, k, &used);
+        off += used;
+        if (r == ILBM_HEADER) ilbm_set_target(&d, planes, np, bpr, h);
+        else if (r != ILBM_NEED_MORE) break;
+    }
+    return ilbm_rows_done(&d);
+}
+
+static void check_ranges_match(const unsigned char *src, unsigned long n, unsigned short step)
+{
+    ilbm_doc_t doc; unsigned long *idx; unsigned char *ref[8], *got[8];
+    unsigned short h, bpr, first, cnt; unsigned char np, p;
+    CHECK(ilbm_doc_parse(&doc, src, n, 0, 0) == ILBMX_OK);
+    h = doc.info.h; np = doc.info.planes; bpr = doc.src_bpr;
+    idx = malloc(sizeof *idx * h);
+    CHECK(ilbm_doc_parse(&doc, src, n, idx, h) == ILBMX_OK);
+    CHECK(doc.rows == h);
+    for (p = 0; p < np; ++p) { ref[p] = calloc(bpr, h); got[p] = calloc(bpr, h); }
+    CHECK(stream_decode(src, n, ref, np, bpr, h) == h);
+    for (first = 0; first < h; first = (unsigned short)(first + step)) {
+        for (cnt = 1; first + cnt <= h; cnt = (unsigned short)(cnt * 2 + 1)) {
+            for (p = 0; p < np; ++p) memset(got[p], 0xAA, (size_t)bpr * h);
+            ilbm_doc_decode_rows(&doc, first, cnt, got, np, bpr, first);
+            for (p = 0; p < np; ++p)
+                CHECK(memcmp(got[p] + (size_t)first * bpr, ref[p] + (size_t)first * bpr, (size_t)cnt * bpr) == 0);
+            if (fails) goto out;
+        }
+    }
+out:
+    for (p = 0; p < np; ++p) { free(ref[p]); free(got[p]); }
+    free(idx);
+}
+
+static void test_ilbmx_tiny_ranges(void) { check_ranges_match(TINY, sizeof TINY, 1); }
+
+static void test_ilbmx_fixtures(void)
+{
+    static const char *files[] = { "tests/fixtures/python_640x400x16.iff", "tests/fixtures/2636_zoom_gray4.iff" };
+    unsigned i;
+    for (i = 0; i < 2; ++i) {
+        long n = 0; unsigned char *b = load_file(files[i], &n);
+        CHECK(b != 0);
+        if (!b) continue;
+        check_ranges_match(b, (unsigned long)n, 37);
+        free(b);
+    }
+}
+
+static void test_ilbmx_header_only(void)
+{
+    ilbm_doc_t doc;
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY, 0, 0) == ILBMX_OK);
+    CHECK(doc.info.w == 16 && doc.info.h == 2 && doc.info.planes == 2 && doc.src_bpr == 2);
+    CHECK(doc.info.ncolors == 4 && doc.body != 0 && doc.body_len == 10 && doc.rows == 0);
+}
+
+static void test_ilbmx_truncated(void)
+{
+    ilbm_doc_t doc; unsigned long idx[2];
+    /* Drop the last 3 bytes: row 1 plane 1 is incomplete, so only row 0 is indexed. */
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY - 3, idx, 2) == ILBMX_PARTIAL);
+    CHECK(doc.rows == 1);
+    /* Header complete, BODY header present but no body bytes. */
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY - 10, idx, 2) == ILBMX_PARTIAL);
+    CHECK(doc.rows == 0);
+    /* Cut inside the BMHD: header invalid. */
+    CHECK(ilbm_doc_parse(&doc, TINY, 30, idx, 2) == ILBMX_ERROR);
+}
+
+static void test_ilbmx_garbage(void)
+{
+    ilbm_doc_t doc; unsigned long idx[2];
+    const unsigned char html[] = "<html><body>404</body></html>";
+    CHECK(ilbm_doc_parse(&doc, html, sizeof html - 1, idx, 2) == ILBMX_ERROR);
+    CHECK(ilbm_doc_parse(&doc, html, sizeof html - 1, 0, 0) == ILBMX_ERROR);
+}
+
+static void test_ilbmx_overflow_rejected(void)
+{
+    unsigned char bad[sizeof TINY]; ilbm_doc_t doc; unsigned long idx[2];
+    memcpy(bad, TINY, sizeof TINY);
+    /* First BODY control byte (offset 68): 0xFF = run of 2 -> make it 0xFD = run of 4 > src_bpr 2. */
+    CHECK(bad[68] == 0xFF);
+    bad[68] = 0xFD;
+    CHECK(ilbm_doc_parse(&doc, bad, sizeof bad, idx, 2) == ILBMX_ERROR);
+}
+
+static void test_ilbmx_clip_and_discard(void)
+{
+    ilbm_doc_t doc; unsigned long idx[2]; unsigned char p0[4], *pl[1];
+    CHECK(ilbm_doc_parse(&doc, TINY, sizeof TINY, idx, 2) == ILBMX_OK);
+    memset(p0, 0x55, sizeof p0); pl[0] = p0;
+    /* Only plane 0 wanted, destination 1 byte per row: plane 1 discarded, col 1 clipped. */
+    ilbm_doc_decode_rows(&doc, 0, 2, pl, 1, 1, 0);
+    CHECK(p0[0] == 0xFF && p0[1] == 0x00);
+    CHECK(p0[2] == 0x55 && p0[3] == 0x55);
+    /* Asking past the indexed rows stops at doc.rows. */
+    memset(p0, 0x55, sizeof p0);
+    ilbm_doc_decode_rows(&doc, 1, 5, pl, 1, 2, 0);
+    CHECK(p0[0] == 0x00 && p0[1] == 0x0F && p0[2] == 0x55);
 }
 
 static void test_netmap(void) {
@@ -304,6 +428,9 @@ int main(void) {
     RUN(test_ilbm_tiny_any_chunking); RUN(test_ilbm_truncated_body);
     RUN(test_ilbm_rejects_garbage); RUN(test_ilbm_fixture); RUN(test_netmap); RUN(test_netmap_open);
     RUN(test_autorange);
+    RUN(test_ilbmx_tiny_ranges); RUN(test_ilbmx_fixtures); RUN(test_ilbmx_header_only);
+    RUN(test_ilbmx_truncated); RUN(test_ilbmx_garbage); RUN(test_ilbmx_overflow_rejected);
+    RUN(test_ilbmx_clip_and_discard);
     printf(fails ? "%d FAILURES\n" : "ALL PASS\n", fails);
     return fails != 0;
 }
