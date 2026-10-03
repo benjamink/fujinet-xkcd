@@ -2,7 +2,8 @@
 #ifndef XKCD_NETMAP_H
 #define XKCD_NETMAP_H
 enum { NET_OK = 0, NET_ERR_NODEVICE = 0x80, NET_ERR_NOTFOUND, NET_ERR_PARSE, NET_ERR_HTTP,
-       NET_ERR_TOOBIG, NET_ERR_CONVERT, NET_ERR_PARTIAL, NET_ERR_NOMEM, NET_ERR_NOIMAGE };
+       NET_ERR_TOOBIG, NET_ERR_CONVERT, NET_ERR_PARTIAL, NET_ERR_NOMEM, NET_ERR_NOIMAGE,
+       NET_ERR_ZOOMBIG };
 
 /* fujinet-nio-lib passes the firmware status byte through unchanged
    (StatusCode::InvalidRequest = 2, ::Unsupported = 8), so these equal FN_ERR_INVALID / FN_ERR_UNSUPPORTED.

@@ -9,5 +9,6 @@ void selector_main(char *out, unsigned short max, int pal)
 
 void selector_zoom(char *out, unsigned short max, int pal)
 {
-    snprintf(out, max, "fmt=ilbm,bits=4,w=640,h=%d,colors=16,base=0", pal ? 512 : 400);
+    (void)pal;   /* width-fit and scroll: the same box on PAL and NTSC */
+    snprintf(out, max, "fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024");
 }

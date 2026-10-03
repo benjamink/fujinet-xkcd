@@ -111,8 +111,8 @@ static void test_selectors(void) {
     char s[64];
     selector_main(s, sizeof s, 1); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=624,h=150,colors=12,base=4,par=1:2") == 0);
     selector_main(s, sizeof s, 0); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=624,h=110,colors=12,base=4,par=1:2") == 0);
-    selector_zoom(s, sizeof s, 1); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=640,h=512,colors=16,base=0") == 0);
-    selector_zoom(s, sizeof s, 0); CHECK(strcmp(s, "fmt=ilbm,bits=4,w=640,h=400,colors=16,base=0") == 0);
+    selector_zoom(s, sizeof s, 1); CHECK(strcmp(s, "fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024") == 0);
+    selector_zoom(s, sizeof s, 0); CHECK(strcmp(s, "fmt=ilbm,bits=4,mode=gray,colors=4,dither=none,w=640,h=1024") == 0);
 }
 
 #include "ilbm.h"
