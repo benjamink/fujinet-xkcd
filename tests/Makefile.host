@@ -1,0 +1,8 @@
+# tests/Makefile.host
+HOSTCC ?= gcc
+SRCS := $(filter-out src/version.c,$(wildcard src/*.c))
+build/host/test_main: tests/test_main.c $(SRCS) $(wildcard src/*.h)
+	@mkdir -p build/host
+	$(HOSTCC) -std=c99 -Wall -Wextra -Werror -O1 -Isrc -o $@ tests/test_main.c $(SRCS)
+	$@
+.PHONY: build/host/test_main

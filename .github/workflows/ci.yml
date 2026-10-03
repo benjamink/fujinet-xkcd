@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - amiga
+
+    # The defoogi image does not ship amiga-gcc, so the toolchain is installed below.
+    steps:
+      - uses: actions/checkout@v4
+
+      # The lib must include fn_open_translated (markjfisher/fujinet-nio-lib#3).
+      # Until that is merged, set the repository variables
+      # FUJINET_NIO_LIB_REPO=benjamink/fujinet-nio-lib and
+      # FUJINET_NIO_LIB_REF=feature/xkcd-image-translator. An unset ref
+      # means the repository's default branch.
+      - name: Check out fujinet-nio-lib
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FUJINET_NIO_LIB_REPO || 'markjfisher/fujinet-nio-lib' }}
+          ref: ${{ vars.FUJINET_NIO_LIB_REF }}
+          path: fujinet-nio-lib
+
+      - name: Check out fujinet-nio-driver
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FUJINET_NIO_DRIVER_REPO || 'markjfisher/fujinet-nio-driver' }}
+          ref: ${{ vars.FUJINET_NIO_DRIVER_REF }}
+          path: fujinet-nio-driver
+
+      # Lay the sibling checkouts out next to the app, as FUJINET_NIO_LIB expects.
+      - name: Place siblings
+        run: |
+          mv fujinet-nio-lib fujinet-nio-driver ..
+
+      - name: Install amiga-gcc
+        run: |
+          # The archive holds opt/amiga/..., so extract it at the root.
+          curl -fsSL https://franke.ms/download/amiga-gcc.tgz | sudo tar -xz -C /
+          echo /opt/amiga/bin >> "$GITHUB_PATH"
+
+      - name: Install amitools
+        run: pip install amitools
+
+      - name: Build
+        run: make ${{ matrix.platform }}/r2r
+        env:
+          FUJINET_NIO_LIB: ${{ github.workspace }}/../fujinet-nio-lib
+          FUJINET_NIO_DRIVER: ${{ github.workspace }}/../fujinet-nio-driver
+
+      # PR case: normal artifact upload
+      - name: Upload artifact for ${{ matrix.platform }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: r2r/${{ matrix.platform }}/**
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host unit tests
+        run: make test
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    if: github.event_name == 'push'
+    # New repositories give GITHUB_TOKEN read-only access; publishing the
+    # "latest" release needs write access to contents.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: r2r-all
+
+      - name: Create or update "latest" release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clear old release assets
+        run: |
+          echo "Fetching existing assets for release 'latest'..."
+          assets=$(gh release view latest --json assets -q '.assets[].name')
+          for asset in $assets; do
+            echo "Deleting $asset..."
+            gh release delete-asset latest "$asset" -y
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload all platform artifacts as zips
+        run: |
+          SHORT_HASH=$(git rev-parse --short HEAD)
+          TMP_DIR=$(mktemp -d)
+          REPO_NAME=$(basename "${GITHUB_REPOSITORY}")
+          for dir in r2r-all/* ; do
+            PLATFORM=$(basename "${dir}")
+            PLATFORM_ID="${REPO_NAME}-${PLATFORM}-${SHORT_HASH}"
+            echo "Zipping ${PLATFORM}..."
+            cp -r "${dir}" "${TMP_DIR}/${PLATFORM_ID}"
+            ZIP_FILE="${PLATFORM_ID}.zip"
+            (cd "${TMP_DIR}" && zip -r "${TMP_DIR}/${ZIP_FILE}" "${PLATFORM_ID}")
+            echo "Uploading ${ZIP_FILE}..."
+            gh release upload latest "${TMP_DIR}/${ZIP_FILE}" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
