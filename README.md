@@ -20,8 +20,10 @@ straight into the screen's bitplanes.
 - An Amiga with Kickstart/Workbench **1.3** (V33) or later and **512 KB**
   chip RAM. The main viewer runs on a stock 512K A500. The app uses only V33
   OS calls, the nix13 C runtime and no floating point.
-- **Zoom** (full-screen, 640x512 interlaced, 4 grey levels) needs about 60 KB
-  of free chip RAM plus up to 256 KB of any RAM for the comic. On a chip-only 512K machine booted from an HDF it fails gracefully with
+- **Zoom** (full-screen, 640x512 interlaced, 4 grey levels) needs about
+  80 KB of chip RAM for the screen (the check wants about 96 KB free on PAL),
+  plus up to 256 KB of any RAM for the comic. On a chip-only 512K machine
+  booted from an HDF it fails gracefully with
   "Not enough chip memory for Zoom". In practice Zoom wants a 512K
   trapdoor/slow-RAM expansion (or a minimal startup-sequence).
 - A FujiNet running a **FujiNet NIO firmware with the Image translator**

@@ -9,7 +9,8 @@ the comic on the web site.
 Requirements
 ------------
  - Any Amiga with Kickstart/Workbench 1.3 or later. The viewer runs
-   in 512K. Zoom needs about 60 KB of free chip RAM; on a chip-only
+   in 512K. Zoom needs about 80 KB of chip RAM for
+   the screen (the check wants about 96 KB free on PAL); on a chip-only
    512K machine it says "Not enough chip memory for Zoom". In practice
    that means a 512K trapdoor/slow-RAM expansion or a minimal startup.
  - A FujiNet running FujiNet NIO firmware with the Image
@@ -33,10 +34,11 @@ Buttons and keys
    < Previous   Left    go back (up to 25 comics)
    Zoom         Z       show the comic full screen, in grey, fitted
                         to the width; Esc returns
-   In Zoom, tall comics scroll: Up/Down 16 rows, Shift+Up/Down or
-   Space/Backspace one page, T top, B bottom, or drag with the left
-   mouse button. A bar at the right edge shows the position.
    Next >       Right   go forward again, or a new random comic
+
+In Zoom, tall comics scroll: Up/Down 16 rows, Shift+Up/Down or
+Space/Backspace one page, T top, B bottom, or drag with the left
+mouse button. A bar at the right edge shows the position.
 
 Project menu (right mouse button)
 ---------------------------------

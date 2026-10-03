@@ -35,7 +35,8 @@
 #define KEY_T       0x14
 #define KEY_B       0x35
 #define KEY_ESC     0x45
-#define TEXT_PEN    3
+#define TEXT_PEN    0                   /* black in the grey ramp */
+#define BG_PEN      3                   /* paper: the lightest grey (white) */
 #define MSG_COLS    (ZOOM_W / 8)
 /* Chip RAM beyond the bitplanes that OpenScreen/OpenWindow need (copper lists for both interlace
    fields, layers, rastport): a generous estimate, only used to refuse early. */
@@ -43,22 +44,22 @@
 
 static struct TextAttr zoom_topaz8 = { (STRPTR)"topaz.font", 8, FS_NORMAL, FPF_ROMFONT };
 
-/* Centred one-line message in TEXT_PEN on pen 0; the full-width text band is cleared first so a
+/* Centred one-line message in TEXT_PEN on BG_PEN; the full-width text band is cleared first so a
    shorter message never leaves part of an earlier one behind. */
 static void zoom_text(struct RastPort *rp, int scr_h, const char *msg)
 {
     int n = (int)strlen(msg), top = (scr_h - 8) / 2;
     if (n > MSG_COLS) n = MSG_COLS;
-    SetAPen(rp, 0);
+    SetAPen(rp, BG_PEN);
     RectFill(rp, 0, top - 2, ZOOM_W - 1, top + 9);
-    SetAPen(rp, TEXT_PEN); SetBPen(rp, 0); SetDrMd(rp, JAM2);
+    SetAPen(rp, TEXT_PEN); SetBPen(rp, BG_PEN); SetDrMd(rp, JAM2);
     Move(rp, (ZOOM_W - n * 8) / 2, top + rp->TxBaseline);
     if (n) Text(rp, (STRPTR)msg, n);
 }
 
 static void zoom_clear(struct RastPort *rp, int scr_h)
 {
-    SetAPen(rp, 0);
+    SetAPen(rp, BG_PEN);
     RectFill(rp, 0, 0, ZOOM_W - 1, scr_h - 1);
 }
 
@@ -70,7 +71,7 @@ static void zoom_bar(struct RastPort *rp, const zs_t *zs, int h)
     zs_thumb(zs, h, &ty, &th);
     SetAPen(rp, 1);
     RectFill(rp, ZOOM_W - BAR_W, 0, ZOOM_W - 1, h - 1);
-    SetAPen(rp, 3);
+    SetAPen(rp, BG_PEN);
     RectFill(rp, ZOOM_W - BAR_W, ty, ZOOM_W - 1, ty + th - 1);
 }
 
@@ -109,8 +110,8 @@ void zoom_show(const xkcd_comic_t *c)
     ns.Width = ZOOM_W;
     ns.Height = (WORD)h;
     ns.Depth = ZOOM_DEPTH;
-    ns.DetailPen = 0;
-    ns.BlockPen = TEXT_PEN;
+    ns.DetailPen = TEXT_PEN;
+    ns.BlockPen = BG_PEN;
     ns.ViewModes = HIRES | LACE;
     ns.Type = CUSTOMSCREEN | SCREENQUIET;      /* no title bar rendering */
     ns.Font = &zoom_topaz8;
@@ -119,14 +120,14 @@ void zoom_show(const xkcd_comic_t *c)
         return;
     }
     ShowTitle(scr, FALSE);                      /* title bar behind the backdrop window */
-    SetRGB4(&scr->ViewPort, 0, 15, 15, 15);     /* until the CMAP arrives: black on white */
+    SetRGB4(&scr->ViewPort, BG_PEN, 15, 15, 15);  /* until the CMAP arrives: black on white */
     SetRGB4(&scr->ViewPort, TEXT_PEN, 0, 0, 0);
 
     memset(&nw, 0, sizeof nw);
     nw.Width = ZOOM_W;
     nw.Height = (WORD)h;
-    nw.DetailPen = 0;
-    nw.BlockPen = TEXT_PEN;
+    nw.DetailPen = TEXT_PEN;
+    nw.BlockPen = BG_PEN;
     nw.IDCMPFlags = RAWKEY | MOUSEBUTTONS | MOUSEMOVE;
     nw.Flags = BACKDROP | BORDERLESS | ACTIVATE | RMBTRAP | REPORTMOUSE | SMART_REFRESH | NOCAREREFRESH;
     nw.Screen = scr;
@@ -140,6 +141,7 @@ void zoom_show(const xkcd_comic_t *c)
     rp = win->RPort;
     bm = &scr->BitMap;
     bpr = bm->BytesPerRow;
+    zs_init(&zs, 0, h);                 /* always defined, even when no image arrives */
 
     zoom_clear(rp, h);
     snprintf(msg, sizeof msg, "Loading #%ld...", c->num);
@@ -151,14 +153,16 @@ void zoom_show(const xkcd_comic_t *c)
         err = (e == NET_ERR_NOMEM) ? "Not enough memory for Zoom" : net_error(e, c->num);
     } else {
         r = ilbm_doc_parse(&doc, buf, len, 0, 0);
-        if (r == ILBMX_ERROR || doc.info.planes > ZOOM_DEPTH || doc.info.w > ZOOM_W) {
+        if (r == ILBMX_ERROR && e == NET_ERR_PARTIAL) {
+            err = "Image transfer interrupted";
+        } else if (r == ILBMX_ERROR || doc.info.planes > ZOOM_DEPTH || doc.info.w > ZOOM_W) {
             err = net_error(NET_ERR_CONVERT, c->num);
         } else if (!(row_off = (unsigned long *)AllocMem(sizeof(unsigned long) * doc.info.h, MEMF_ANY))) {
             err = "Not enough memory for Zoom";
         } else {
             r = ilbm_doc_parse(&doc, buf, len, row_off, doc.info.h);
             if (r == ILBMX_ERROR) {
-                err = net_error(NET_ERR_CONVERT, c->num);
+                err = (e == NET_ERR_PARTIAL) ? "Image transfer interrupted" : net_error(NET_ERR_CONVERT, c->num);
             } else {
                 if (r == ILBMX_PARTIAL || e == NET_ERR_PARTIAL) err = "Image transfer interrupted";
                 have = 1;
@@ -182,13 +186,14 @@ void zoom_show(const xkcd_comic_t *c)
 
         zoom_clear(rp, h);
         visible = img_h < h ? img_h : h;
+        WaitBlit();                     /* blitter clear must finish before the CPU decodes */
         ilbm_doc_decode_rows(&doc, (unsigned short)zs.top, (unsigned short)visible, planes, ZOOM_DEPTH,
                              (unsigned short)bpr, (unsigned short)y0);
         if (zs_scrollable(&zs)) zoom_bar(rp, &zs, h);
     }
     if (err) zoom_text(rp, h, err);
 
-    SetBPen(rp, 0);                     /* ScrollRaster clears the vacated band to pen 0 */
+    SetBPen(rp, BG_PEN);                /* ScrollRaster clears the vacated band to BG_PEN */
     while (!done) {
         int delta = 0;
 
@@ -247,9 +252,10 @@ void zoom_show(const xkcd_comic_t *c)
                 if (cnt < h) {
                     ScrollRaster(rp, 0, applied, 0, 0, ZOOM_W - BAR_W - 1, h - 1);
                 } else {
-                    SetAPen(rp, 0);
+                    SetAPen(rp, BG_PEN);
                     RectFill(rp, 0, 0, ZOOM_W - BAR_W - 1, h - 1);
                 }
+                WaitBlit();             /* ScrollRaster/RectFill blits must finish first */
                 ilbm_doc_decode_rows(&doc, (unsigned short)(zs.top + f), (unsigned short)cnt, planes,
                                      ZOOM_DEPTH, (unsigned short)bpr, (unsigned short)f);
                 zoom_bar(rp, &zs, h);

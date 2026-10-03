@@ -45,7 +45,8 @@ remove that override.
 - `-mcrt=nix13`, 68000 and **no floating point**.
 - A500 with 512 KB chip RAM is the minimum:
   - Check every chip allocation. On failure, show a message and never crash.
-  - Zoom needs about 60 KB of free chip RAM (2 bitplanes) and refuses
+  - Zoom needs about 80 KB of chip RAM for the screen (2 bitplanes; the
+    pre-check wants about 96 KB free on PAL) and refuses
     gracefully without it.
   - Zoom keeps the compressed ILBM in `MEMF_ANY` memory (at most 256 KB) and
     decodes only the visible rows into the screen; it never decodes the whole
@@ -57,7 +58,8 @@ remove that override.
   - `ReplyMsg` every IntuiMessage, and never touch it afterwards;
   - remove the Fetch ID input.device handler before freeing anything it uses.
 - The ILBM decoder writes straight into screen bitplanes. Image placement must
-  stay word-aligned and inside the box, via `ui_place_image()`.
+  stay word-aligned and inside the box, via `ui_place_image()` (main view).
+  Zoom places its own image: word-aligned x, clamped to the bitmap row width.
 
 ## FujiNet contract
 
