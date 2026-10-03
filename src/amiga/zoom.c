@@ -80,7 +80,7 @@ void zoom_show(const xkcd_comic_t *c)
     struct Window *win;
     struct IntuiMessage *m;
     zoom_ctx_t z;
-    char sel[48], msg[32];
+    char sel[64], msg[32];
     unsigned char e;
     int h = ui_is_pal() ? 512 : 400, done = 0;
     ULONG plane = (ULONG)(ZOOM_W / 8) * (ULONG)h;

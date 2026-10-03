@@ -61,6 +61,7 @@ remove that override.
   `fn_open_translated()`. The selector string (`src/selector.c`) is the
   contract with the firmware's `parse_selector`, and it must match character for
   character. The grammar is in `fujinet-nio/docs/network_device_protocol.md`.
+  This app sends `fmt=ilbm,bits=4` prefix, plus spatial and palette keys.
   If you change a selector, re-check it against that grammar.
 - Older firmware rejects type 4 at Open with `FN_ERR_INVALID`. The app maps
   that to "FujiNet firmware lacks image conversion" (`netmap_open_error`).

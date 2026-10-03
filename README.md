@@ -90,7 +90,7 @@ firmware.
 
 The app and the firmware share one contract: the selector string passed
 with content translation type `4` (`Image`) when the image URL is opened.
-It is a comma-separated list of `key=value` pairs (`w`, `h`, `colors`,
+It is a comma-separated list of `key=value` pairs (`fmt`, `bits`, `w`, `h`, `colors`,
 `base`, `par`, `dither`, `mode`, `up`). The firmware replies with a
 `FORM ILBM` (BMHD, CMAP, ByteRun1 BODY). The full grammar, defaults, limits
 and error codes are documented in
@@ -102,9 +102,9 @@ merged upstream, it is on the `feature/xkcd-image-translator` branch.
 This app sends (see `src/selector.c`):
 
 - Main view, pens 4–15 on the 640×256 (PAL) or 640×200 (NTSC) hires screen:
-  `w=624,h=150,colors=12,base=4,par=1:2` (PAL) or `h=110` (NTSC).
+  `fmt=ilbm,bits=4,w=624,h=150,colors=12,base=4,par=1:2` (PAL) or `h=110` (NTSC).
 - Zoom, pens 0–15 on the 640×512 (PAL) or 640×400 (NTSC) interlaced screen:
-  `w=640,h=512,colors=16,base=0` (PAL) or `h=400` (NTSC).
+  `fmt=ilbm,bits=4,w=640,h=512,colors=16,base=0` (PAL) or `h=400` (NTSC).
 
 ## Credits
 

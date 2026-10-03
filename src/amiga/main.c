@@ -18,7 +18,7 @@ static xkcd_comic_t current, fetched;
 static long latest_num;
 static int auto_on;
 static unsigned short auto_secs = AUTO_DEFAULT;
-static char sel_main[48];
+static char sel_main[64];
 
 static void update_buttons(void)
 {
