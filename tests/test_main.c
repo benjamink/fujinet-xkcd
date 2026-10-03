@@ -242,8 +242,12 @@ static void check_ranges_match(const unsigned char *src, unsigned long n, unsign
         for (cnt = 1; first + cnt <= h; cnt = (unsigned short)(cnt * 2 + 1)) {
             for (p = 0; p < np; ++p) memset(got[p], 0xAA, (size_t)bpr * h);
             ilbm_doc_decode_rows(&doc, first, cnt, got, np, bpr, first);
-            for (p = 0; p < np; ++p)
-                CHECK(memcmp(got[p] + (size_t)first * bpr, ref[p] + (size_t)first * bpr, (size_t)cnt * bpr) == 0);
+            for (p = 0; p < np; ++p) {
+                size_t k, lo = (size_t)first * bpr, hi = (size_t)(first + cnt) * bpr;
+                CHECK(memcmp(got[p] + lo, ref[p] + lo, hi - lo) == 0);
+                for (k = 0; k < (size_t)bpr * h; ++k)
+                    if ((k < lo || k >= hi) && got[p][k] != 0xAA) { CHECK(!"write outside requested rows"); break; }
+            }
             if (fails) goto out;
         }
     }
@@ -253,6 +257,49 @@ out:
 }
 
 static void test_ilbmx_tiny_ranges(void) { check_ranges_match(TINY, sizeof TINY, 1); }
+
+/* TINY with an uncompressed BODY (compression 0, 8 bytes). */
+static void test_ilbmx_tiny_uncompressed(void)
+{
+    static const unsigned char rows[8] = { 0xFF,0xFF, 0x00,0x00, 0x00,0x0F, 0xF0,0x00 };
+    unsigned char raw[76];
+    memcpy(raw, TINY, 68);
+    raw[7] = 68;                 /* FORM len: 4 + 28 + 20 + 16 */
+    CHECK(raw[30] == 1);         /* BMHD compression byte */
+    raw[30] = 0;
+    CHECK(raw[60] == 'B' && raw[67] == 0x0A);
+    raw[67] = 8;                 /* BODY len */
+    memcpy(raw + 68, rows, 8);
+    check_ranges_match(raw, sizeof raw, 1);
+}
+
+/* Chunk lengths from the wire must never wrap pointer arithmetic (32-bit on the 68000). */
+static void test_ilbmx_huge_chunk_len(void)
+{
+    static const unsigned char lens[2][4] = { {0xFF,0xFF,0xFF,0xF8}, {0xFF,0xFF,0xFF,0xE6} };
+    unsigned i; ilbm_doc_t doc; unsigned long idx[2];
+    for (i = 0; i < 2; ++i) {
+        unsigned char b[64];
+        memset(b, 0, sizeof b);
+        memcpy(b, "FORM", 4); b[7] = 56; memcpy(b + 8, "ILBM", 4);
+        memcpy(b + 12, "JUNK", 4); memcpy(b + 16, lens[i], 4);
+        /* No BMHD seen before the walk stops: invalid. */
+        CHECK(ilbm_doc_parse(&doc, b, sizeof b, 0, 0) == ILBMX_ERROR);
+        CHECK(ilbm_doc_parse(&doc, b, sizeof b, idx, 2) == ILBMX_ERROR);
+    }
+    {   /* Valid BMHD, then JUNK with a huge length, then a BODY that is never reached. */
+        unsigned char b[sizeof TINY + 16];
+        memcpy(b, TINY, 12 + 28);                       /* FORM, ILBM, BMHD */
+        memcpy(b + 40, "JUNK", 4); memcpy(b + 44, lens[0], 4);
+        memset(b + 48, 0, 4);
+        memcpy(b + 52, TINY + 60, sizeof TINY - 60);    /* BODY header + data */
+        /* Header is valid, the walk stops at JUNK: OK with no BODY found; index call is PARTIAL. */
+        CHECK(ilbm_doc_parse(&doc, b, 52 + (sizeof TINY - 60), 0, 0) == ILBMX_OK);
+        CHECK(doc.body == 0 && doc.body_len == 0);
+        CHECK(ilbm_doc_parse(&doc, b, 52 + (sizeof TINY - 60), idx, 2) == ILBMX_PARTIAL);
+        CHECK(doc.rows == 0);
+    }
+}
 
 static void test_ilbmx_fixtures(void)
 {
@@ -428,7 +475,7 @@ int main(void) {
     RUN(test_ilbm_tiny_any_chunking); RUN(test_ilbm_truncated_body);
     RUN(test_ilbm_rejects_garbage); RUN(test_ilbm_fixture); RUN(test_netmap); RUN(test_netmap_open);
     RUN(test_autorange);
-    RUN(test_ilbmx_tiny_ranges); RUN(test_ilbmx_fixtures); RUN(test_ilbmx_header_only);
+    RUN(test_ilbmx_tiny_ranges); RUN(test_ilbmx_tiny_uncompressed); RUN(test_ilbmx_huge_chunk_len); RUN(test_ilbmx_fixtures); RUN(test_ilbmx_header_only);
     RUN(test_ilbmx_truncated); RUN(test_ilbmx_garbage); RUN(test_ilbmx_overflow_rejected);
     RUN(test_ilbmx_clip_and_discard);
     printf(fails ? "%d FAILURES\n" : "ALL PASS\n", fails);

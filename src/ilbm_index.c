@@ -15,13 +15,13 @@ static int parse_header(ilbm_doc_t *d, const unsigned char *buf, unsigned long l
     memset(d, 0, sizeof *d);
     if (len < 12 || memcmp(buf, "FORM", 4) != 0 || memcmp(buf + 8, "ILBM", 4) != 0)
         return ILBMX_ERROR;
-    while (pos + 8 <= len) {
+    while (len - pos >= 8) {
         const unsigned char *ck = buf + pos;
         unsigned long clen = be32(ck + 4);
         unsigned long data = pos + 8;
         if (memcmp(ck, "BMHD", 4) == 0) {
             const unsigned char *b = buf + data;
-            if (clen != 20 || data + 20 > len) return ILBMX_ERROR;
+            if (clen != 20 || len - data < 20) return ILBMX_ERROR;
             d->info.w = (unsigned short)((b[0] << 8) | b[1]);
             d->info.h = (unsigned short)((b[2] << 8) | b[3]);
             d->info.planes = b[8];
@@ -32,17 +32,19 @@ static int parse_header(ilbm_doc_t *d, const unsigned char *buf, unsigned long l
         } else if (memcmp(ck, "CMAP", 4) == 0) {
             unsigned long n = clen, i;
             if (n > 96) n = 96;
-            if (data + n > len) n = len > data ? len - data : 0;
+            if (n > len - data) n = len - data;
             for (i = 0; i < n; ++i) d->info.cmap[i / 3][i % 3] = buf[data + i];
             d->info.ncolors = (unsigned char)(n / 3);
         } else if (memcmp(ck, "BODY", 4) == 0) {
             if (!have_bmhd) return ILBMX_ERROR;
             d->body = buf + data;
-            d->body_len = data <= len ? len - data : 0;
+            d->body_len = len - data;
             if (d->body_len > clen) d->body_len = clen;
             break;
         }
-        pos = data + clen + (clen & 1);
+        if (clen > len - data) break;       /* truncated or bogus length: stop walking (no wrap) */
+        pos = data + clen;
+        if ((clen & 1) && pos < len) ++pos;
     }
     if (!have_bmhd) return ILBMX_ERROR;
     d->src_bpr = (unsigned short)(((d->info.w + 15) / 16) * 2);
