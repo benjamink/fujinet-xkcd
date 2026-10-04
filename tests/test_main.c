@@ -7,6 +7,7 @@
 #include "wrap.h"
 #include "selector.h"
 #include "autorange.h"
+#include "countdown.h"
 #include "jsonstrip.h"
 
 static int fails;
@@ -406,6 +407,22 @@ static void test_autorange(void)
     CHECK(auto_clamp(0) == 10 && auto_clamp(9999) == 600 && auto_clamp(64) == 60);
 }
 
+static void test_countdown(void)
+{
+    const unsigned long cap = 600 * COUNTDOWN_US;
+    CHECK(countdown_left_us(100, 0, 100, 0, cap) == 0);                 /* exactly due */
+    CHECK(countdown_left_us(100, 0, 101, 5, cap) == 0);                 /* overdue */
+    CHECK(countdown_left_us(160, 0, 100, 0, cap) == 60 * COUNTDOWN_US);
+    CHECK(countdown_left_us(160, 200, 159, 999900, cap) == 300);        /* borrow across seconds */
+    CHECK(countdown_left_us(4000000000UL, 0, 1, 0, cap) == cap);       /* clock set back: saturate */
+    CHECK(countdown_shown(60 * COUNTDOWN_US) == 60);
+    CHECK(countdown_shown(59 * COUNTDOWN_US + 1) == 60);
+    CHECK(countdown_shown(1) == 1 && countdown_shown(0) == 0);
+    CHECK(countdown_wait_us(60 * COUNTDOWN_US) == COUNTDOWN_US);
+    CHECK(countdown_wait_us(59 * COUNTDOWN_US + 250000) == 250000);
+    CHECK(countdown_wait_us(0) == 0);
+}
+
 /* Runs src through jsonstrip in chunk-size steps; returns output length or -1 on overflow. */
 static int strip_run(const char *src, size_t n, size_t chunk, char *out, unsigned short cap) {
     jsonstrip_t js; size_t i;
@@ -527,7 +544,7 @@ int main(void) {
     RUN(test_random_pick_skips_404); RUN(test_history); RUN(test_wrap); RUN(test_selectors);
     RUN(test_ilbm_tiny_any_chunking); RUN(test_ilbm_truncated_body);
     RUN(test_ilbm_rejects_garbage); RUN(test_ilbm_fixture); RUN(test_netmap); RUN(test_netmap_open);
-    RUN(test_autorange);
+    RUN(test_autorange); RUN(test_countdown);
     RUN(test_ilbmx_tiny_ranges); RUN(test_ilbmx_tiny_uncompressed); RUN(test_ilbmx_huge_chunk_len); RUN(test_ilbmx_fixtures); RUN(test_ilbmx_header_only);
     RUN(test_ilbmx_truncated); RUN(test_ilbmx_garbage); RUN(test_ilbmx_overflow_rejected);
     RUN(test_ilbmx_clip_and_discard);

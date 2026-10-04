@@ -3,8 +3,9 @@
    Each dialog opens a small window on the main screen and runs its own modal loop on that
    window's port. Every message is replied; the window is closed on every path. The main
    window's IDCMP is not drained meanwhile (its messages wait in its own port), and the
-   auto-refresh timer is not serviced: main() catches a fired timer afterwards through
-   timer_fired(), because the timer's signal bit stays set until main() Waits on it.      */
+   auto-refresh timer is not serviced: main() catches a fired tick afterwards through
+   timer_poll(), because the timer's signal bit stays set until main() Waits on it. The
+   countdown runs on the system clock, so it loses no time while a dialog is open.       */
 #include <stdio.h>
 #include <string.h>
 #include <exec/types.h>

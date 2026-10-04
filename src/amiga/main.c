@@ -20,9 +20,18 @@ static int auto_on;
 static unsigned short auto_secs = AUTO_DEFAULT;
 static char sel_main[64];
 
+/* Seconds to the next auto fetch; the full interval while one is in progress (timer stopped). */
+static unsigned short auto_shown(void)
+{
+    unsigned short left;
+    if (!auto_on) return 0;
+    left = timer_secs_left();
+    return left ? left : auto_secs;
+}
+
 static void update_buttons(void)
 {
-    ui_set_buttons(h.count && h.pos > 0, auto_on ? auto_secs : 0);
+    ui_set_buttons(h.count && h.pos > 0, auto_shown());
 }
 
 static int fetch_latest(void)
@@ -109,8 +118,12 @@ int main(void)
         default: {
             ULONG sig = Wait(ui_sigmask() | timer_sigmask() | SIGBREAKF_CTRL_C);
             if (sig & SIGBREAKF_CTRL_C) quit = 1;
-            /* timer_fired() is the authority: the port signal alone can be stale after an abort. */
-            else if (timer_fired() && auto_on) { show_random(); timer_start(auto_secs); }
+            /* timer_poll() is the authority: the port signal alone can be stale after an abort. */
+            else if (auto_on) switch (timer_poll()) {
+                case TIMER_TICK: ui_set_auto(auto_shown()); break;
+                case TIMER_DONE: show_random(); timer_start(auto_secs); ui_set_auto(auto_shown()); break;
+                default: break;
+            }
             break;
         }
         }

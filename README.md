@@ -110,7 +110,7 @@ The **xkcd** menu (right mouse button):
 | Item | Shortcut | Action |
 |---|---|---|
 | Fetch ID… | Amiga-F | Show a comic by number. OK or **Return** fetches it; Cancel or **Esc** closes the window. A number that is not a comic shows "Comic #N does not exist". |
-| Auto Refresh… | Amiga-A | Fetch a random comic every 10–600 seconds (default 60). **Start** begins, **Stop** ends, **Cancel** changes nothing. The interval counts from when a comic finishes loading. |
+| Auto Refresh… | Amiga-A | Fetch a random comic every 10–600 seconds (default 60). **Start** begins, **Stop** ends, **Cancel** changes nothing. The interval counts from when a comic finishes loading, and the "Auto:" indicator at the bottom right counts down the seconds to the next fetch. |
 | Quit | Amiga-Q | Quit |
 
 Interactive comics with no static image (for example #1608) show their
