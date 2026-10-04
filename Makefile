@@ -23,6 +23,15 @@ EXECUTABLE_EXTRA_DEPS_AMIGA = $(NIO_LIB_A)
 DISK_EXTRA_FILES_AMIGA = amiga/icons/xkcd.info:xkcd.info amiga/icons/Disk.info:Disk.info \
                          amiga/ReadMe.txt:ReadMe amiga/icons/ReadMe.info:ReadMe.info
 
+# Version in the $VER string: the newest v* tag without its "v" (v0.2 -> 0.2),
+# or 0.1 before the first tag. The release workflow passes XKCD_VERSION from the
+# tag it is publishing, which may not exist yet when it builds.
+XKCD_VERSION ?= $(patsubst v%,%,$(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null))
+ifeq ($(strip $(XKCD_VERSION)),)
+  override XKCD_VERSION := 0.1
+endif
+CFLAGS_EXTRA_AMIGA += -DXKCD_VERSION='"$(XKCD_VERSION)"'
+
 include mekkogx/toplevel-rules.mk
 
 # Ask fujinet-nio-lib's own build whether its archive is current.

@@ -1,0 +1,87 @@
+name: Release
+
+# Push a version tag (git tag v0.2 && git push origin v0.2) to publish a
+# release for it, with the app's ADF attached. It can also be run by hand from
+# the Actions tab: a tag that does not exist yet is created on the chosen
+# branch's commit. Re-running for an existing release replaces its ADF.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, for example v0.2'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # New repositories give GITHUB_TOKEN read-only access; creating a release
+    # (and its tag) needs write access to contents.
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+
+    # The build steps match ci.yml, including its repository variables.
+    steps:
+      - uses: actions/checkout@v4
+
+      # The lib must include fn_open_translated (markjfisher/fujinet-nio-lib#3).
+      # Until that is merged, set the repository variables
+      # FUJINET_NIO_LIB_REPO=benjamink/fujinet-nio-lib and
+      # FUJINET_NIO_LIB_REF=feature/xkcd-image-translator. An unset ref
+      # means the repository's default branch.
+      - name: Check out fujinet-nio-lib
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FUJINET_NIO_LIB_REPO || 'markjfisher/fujinet-nio-lib' }}
+          ref: ${{ vars.FUJINET_NIO_LIB_REF }}
+          path: fujinet-nio-lib
+
+      - name: Check out fujinet-nio-driver
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FUJINET_NIO_DRIVER_REPO || 'markjfisher/fujinet-nio-driver' }}
+          ref: ${{ vars.FUJINET_NIO_DRIVER_REF }}
+          path: fujinet-nio-driver
+
+      # Lay the sibling checkouts out next to the app, as FUJINET_NIO_LIB expects.
+      - name: Place siblings
+        run: |
+          mv fujinet-nio-lib fujinet-nio-driver ..
+
+      - name: Install amiga-gcc
+        run: |
+          # The archive holds opt/amiga/..., so extract it at the root.
+          curl -fsSL https://franke.ms/download/amiga-gcc.tgz | sudo tar -xz -C /
+          echo /opt/amiga/bin >> "$GITHUB_PATH"
+
+      - name: Install amitools
+        run: pip install amitools
+
+      - name: Host unit tests
+        run: make test
+
+      - name: Build
+        run: make amiga/r2r XKCD_VERSION="${TAG#v}"
+        env:
+          FUJINET_NIO_LIB: ${{ github.workspace }}/../fujinet-nio-lib
+          FUJINET_NIO_DRIVER: ${{ github.workspace }}/../fujinet-nio-driver
+
+      - name: Name the ADF after the tag
+        run: |
+          test -f r2r/amiga/xkcd.adf
+          cp r2r/amiga/xkcd.adf "xkcd-${TAG}.adf"
+
+      - name: Create the release, or replace its ADF
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "xkcd-${TAG}.adf" --clobber
+          else
+            gh release create "$TAG" "xkcd-${TAG}.adf" \
+              --title "xkcd ${TAG}" --target "$GITHUB_SHA" --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
