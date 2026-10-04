@@ -19,8 +19,9 @@ unsigned long ui_sigmask(void);
 int  ui_poll(void);                 /* drains IDCMP, returns first UI_* action */
 void ui_show_comic(const xkcd_comic_t *c);     /* title bar, caption, clears image area */
 void ui_status(const char *msg);               /* bottom status line */
-/* auto_on: 0 = off; otherwise the refresh interval in seconds, shown as "Auto: Ns" */
-void ui_set_buttons(int can_prev, int auto_on);
+/* auto_secs: 0 = off; otherwise the seconds to show as "Auto: Ns" (see ui_set_auto) */
+void ui_set_buttons(int can_prev, unsigned short auto_secs);
+void ui_set_auto(unsigned short secs);         /* countdown indicator; redraws only when secs changes */
 int  ui_image_header_cb(void *ctx, const ilbm_info_t *i, unsigned char **planes, unsigned char *np,
                         unsigned short *bpr, unsigned short *rows);   /* centres image in box, sets pens 4-15 */
 /* Shared word-aligned placement: centres info's image in the box (x 0..box_w-1, rows top..top+box_h-1)

@@ -48,6 +48,7 @@ static struct Screen *scr;
 static struct Window *win;
 static struct TextFont *font;
 static int pal, menu_on, prev_on;
+static unsigned short auto_shown;     /* last value drawn by ui_set_auto; 0xFFFF forces a redraw */
 static int img_h, cap_top, cap_lines, btn_top, status_top, scr_h;
 static char scr_title[XKCD_TITLE_MAX + 40];
 
@@ -214,6 +215,7 @@ int ui_open(void)
     if ((font = OpenFont(&topaz8)) != 0) SetFont(win->RPort, font);
     SetWindowTitles(win, (UBYTE *)-1, (UBYTE *)"xkcd");
     prev_on = 1;
+    auto_shown = 0xFFFF;
     ui_set_buttons(0, 0);
     return 1;
 }
@@ -310,13 +312,24 @@ void ui_status(const char *msg)
     text_at(8, status_top + 2, msg, STATUS_COLS);
 }
 
-void ui_set_buttons(int can_prev, int auto_on)
+void ui_set_buttons(int can_prev, unsigned short auto_secs)
+{
+    set_prev(can_prev != 0);
+    ui_set_auto(auto_secs);
+}
+
+void ui_set_auto(unsigned short secs)
 {
     char buf[AUTO_COLS + 1];
-    set_prev(can_prev != 0);
-    if (auto_on) snprintf(buf, sizeof buf, "Auto: %ds", auto_on);
-    else buf[0] = 0;
-    clear(AUTO_X, btn_top, AUTO_X + AUTO_COLS * 8 - 1, btn_top + BTN_H - 1);
+    int n = 0;
+    if (secs == auto_shown) return;
+    auto_shown = secs;
+    /* Padded to the full width and drawn JAM2, so a shorter value overwrites a longer one without
+       clearing first: the once-a-second countdown does not flicker. */
+    if (secs) n = snprintf(buf, sizeof buf, "Auto: %us", secs);
+    if (n < 0 || n > AUTO_COLS) n = AUTO_COLS;
+    while (n < AUTO_COLS) buf[n++] = ' ';
+    buf[n] = 0;
     text_at(AUTO_X, btn_top + (BTN_H - 8) / 2, buf, AUTO_COLS);
 }
 
